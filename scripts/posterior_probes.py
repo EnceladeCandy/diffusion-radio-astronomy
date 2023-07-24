@@ -142,7 +142,7 @@ def main(args):
     #pc_samples = pc_sampler(num_samples = 100, num_pred_steps = 500, num_corr_steps = 20, snr = 1e-2, score_function = score_posterior, img_size = 28)
     euler_samples = euler_sampler(num_samples = args.num_samples, num_steps = args.num_iters, score_function = score_posterior, img_size = img_size)
 
-    torch.save(euler_samples, "../../samples/idx_101.pt")
+    torch.save([sigma_likelihood, euler_samples], f"../../samples/{sigma_likelihood:.1g}.pt")
 
 if __name__ == '__main__':
     from argparse import ArgumentParser
