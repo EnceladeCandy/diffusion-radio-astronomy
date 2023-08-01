@@ -35,9 +35,12 @@ def main(args):
     # Idx of the image in the dataset and 
     idx = args.idx
     sigma_likelihood = args.sigma_likelihood
+    sampler = args.sampler.lower()
 
     # Importing the posterior samples
-    path = f"../../"+ args.samples_folder + f"/sigma_{sigma_likelihood:.1g}/"
+    #path = f"../../"+ args.samples_folder + f"/sigma_{sigma_likelihood:.1g}/"
+    
+    path = f"../../corr20_snr0.01/"
     samples = torch.load(path + f"idx_{idx}.pt", map_location=device)
     num_samples = samples.shape[0]
     img_size = int((samples.shape[1])**0.5) # Assuming images with height = width
@@ -54,7 +57,7 @@ def main(args):
 
 
     psf = torch.load("../psf64.pt", map_location = device)
-    img = torch.tensor(dataset[0, ..., 1]) # green channel
+    img = torch.tensor(dataset[idx, ..., 1]) # green channel
     img = preprocess_probes_g_channel(img) # probes (N, 256, 256, 3)
     img = F.avg_pool2d(img[None, None, ...], (4, 4))[0, 0].to(device)
     #img = torch.load("../ground_truth.pt")
@@ -83,13 +86,13 @@ def main(args):
     for i in range(len(axs)): 
         axs[i].axis("off")
 
-    axs[0].imshow(img.reshape(img_size, img_size).cpu(), cmap = "hot")
+    axs[0].imshow(img.reshape(img_size, img_size).cpu(), cmap = "hot", vmin = 0, vmax = 1.48)
     axs[0].set_title("Ground-truth")
     axs[1].imshow(dirty_image_noise.cpu(), cmap = "hot")
     axs[1].set_title("Dirty image with noise")
     plt.subplots_adjust(wspace = 0.1)
     fig.suptitle(r"$\sigma_{lh}$ = " + f"{sigma_likelihood:.1g}", y = 0.1)
-    plt.savefig(f"../../images/naive_rec/{sigma_likelihood:.1g}_{idx}.jpeg", bbox_inches = "tight", pad_inches = 0.1)
+    plt.savefig(f"../../images/naive_rec/{sampler}_{sigma_likelihood:.1g}_{idx}.jpeg", bbox_inches = "tight", pad_inches = 0.1)
 
 
     print("Plotting posterior samples...\n")
@@ -98,9 +101,9 @@ def main(args):
     grid_size = int((args.num_samples) ** 0.5)
     if grid_size==1:
         fig = plt.figure(figsize= (8,8), dpi = 150)
-        plt.imshow(samples[0].cpu(), cmap = "hot")
+        plt.imshow(samples[0].cpu(), cmap = "hot", vmin = 0, vmax = 1.48)
         plt.axis("off")
-        plt.savefig(f"../../images/samples/posterior_{sigma_likelihood:.1g}_{idx}.jpg", bbox_inches = "tight", pad_inches = 0.1)
+        plt.savefig(f"../../images/samples/{sampler}_{sigma_likelihood:.1g}_{idx}.jpg", bbox_inches = "tight", pad_inches = 0.1)
 
     else:
         fig, axs = plt.subplots(grid_size, grid_size, figsize = (10, 10), dpi = 150)
@@ -108,17 +111,18 @@ def main(args):
         k = 0
         for i in range(grid_size): 
             for j in range(grid_size): 
-                axs[i, j].imshow(samples[k].cpu(), cmap = "hot")
+                axs[i, j].imshow(samples[k].cpu(), cmap = "hot", vmin = 0, vmax = 1.48)
                 axs[i, j].axis("off")
                 k += 1
         fig.suptitle(r"$\sigma_{lh}$ = " + f"{sigma_likelihood:.1g}", y = 0.1)
         plt.subplots_adjust(wspace = 0.1, hspace = 0.1)
-        plt.savefig(f"../../images/samples/posterior_{sigma_likelihood:.1g}_{idx}.jpg", bbox_inches = "tight", pad_inches = 0.1)
+        plt.savefig(f"../../images/samples/{sampler}_{sigma_likelihood:.1g}_{idx}.jpg", bbox_inches = "tight", pad_inches = 0.1)
 
 if __name__ == "__main__": 
     from argparse import ArgumentParser
     parser = ArgumentParser()
     parser.add_argument("--sigma_likelihood",        required = True,    type = float)
+    parser.add_argument("--sampler",                required = True,      default = "pc",   help = "'pc' or 'euler'")
     parser.add_argument("--idx",                required = True,    type = int)
     parser.add_argument("--num_samples",    required = True,    type=int, help = "Number of samples to view in the plot (ideally a perfect square)")
     parser.add_argument("--samples_folder",        required = False,    default ="samples_probes")
