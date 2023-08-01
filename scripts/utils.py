@@ -1,5 +1,7 @@
 import torch 
+from astropy.io import fits
 import torch.nn.functional as F
+import numpy as np
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -29,3 +31,13 @@ def probes_64(dataset, idx):
     img = preprocess_probes_g_channel(img) 
     img = F.avg_pool2d(img[None, None, ...], (4, 4))[0, 0].to(device) # Need for the image to be (1, 1, 64, 64)
     return img
+
+def probes_256(dataset, idx): 
+    img = torch.tensor(dataset[idx, ..., 1])
+    img = preprocess_probes_g_channel(img, inv_link = False)
+
+def fits_to_tensor(file): 
+    with fits.open(file) as hdul: 
+        header = hdul[0].header
+        data = torch.tensor((hdul[0].data).astype(np.float32))[0,0, ...]
+    return data
