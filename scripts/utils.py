@@ -13,6 +13,13 @@ def preprocess_probes_g_channel(img, inv_link = False):  # channel 0
 def link_function(x):
     return (x + 1)/2
 
+def resize(x, target_size=64):
+        x_size = x.shape[-1] 
+        start = int((x_size-target_size)/2)
+        end = start + target_size
+        x = x[start:end, start:end]
+        return x
+
 def probes_64(dataset, idx):
     """
     dataset = probes 
