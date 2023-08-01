@@ -9,8 +9,11 @@ import h5py
 from score_models import ScoreModel, NCSNpp
 import json
 import os
+import sys
+sys.path.append("../..")
 import h5py
 
+from utils import probes_64, link_function
 
 # total number of slurm workers detected
 # defaults to 1 if not running under SLURM
@@ -37,45 +40,45 @@ dataset = hdf['galaxies']
 
 
 def main(args):
-    # Utility function
-    def preprocess_probes_g_channel(img, inv_link = False):  # channel 0
-        img = torch.clamp(img, 0, 1.48)
-        
-        if inv_link:
-            img = 2 * img / 1.48 - 1.
-        return img
+    hparams_sampler = [(20, 1e-2), (500, 1e-3), (2000, 1e-4)] # Format = (num_corr_step, snr)
 
-    def link_function(x):
-        return (x + 1)/2
-
-
-    # Path to your .fits file
-    psf = torch.load("../psf64.pt")
+    # Args of the scripts
+    if N_WORKERS>1:
+        idx = THIS_WORKER
+        num_samples = args.num_samples
+        num_iters = args.num_iters
+        num_corr_steps, snr = hparams_sampler[int(idx/100)] # Every 100 workers we change parameters (100 simulations per hparams)
+        marker = f"/corr{num_corr_steps}_snr{snr:.1g}"
+        folder_dir = "../../" + args.samples_folder + marker
+        if idx%100==0:    
+            os.mkdir(folder_dir)
+    else: 
+        idx = args.idx
+        num_samples = args.num_samples
+        num_iters = args.num_iters
+        num_corr_steps = args.num_corr_steps
+        snr = args.snr
 
     def ft(x): 
         return torch.fft.fft2(x, norm = "ortho")
-
-    if N_WORKERS>1:
-        idx = THIS_WORKER
-    else: 
-        idx = args.idx
     
-    img = torch.tensor(dataset[idx, ..., 1]) # green channel
-    img = preprocess_probes_g_channel(img) # probes (N, 256, 256, 3)
-    img = F.avg_pool2d(img[None, None, ...], (4, 4))[0, 0].to(device)
+    # Loading an image in the dataset:
+    img = probes_64(dataset, idx)
     #img = link_function(torch.load("../../prior.pt")[idx]) # PRIOR SAMPLES
     img_size = img.shape[-1]
 
+    # Loading the psf
+    psf = torch.load("../psf64.pt")
+
+    # Calculating the sampled visibilities given the full visibility and the psf
     vis_full = ft(img).flatten()
     sampling_function= ft(torch.fft.ifftshift(psf)).flatten()
     vis_sampled = sampling_function * vis_full
     vis_sampled = vis_sampled.flatten()
     vis_sampled = torch.cat([vis_sampled.real, vis_sampled.imag])
 
-    num_samples = args.num_samples
-    num_iters = args.num_iters
+    
     samples_per_loop = 20 # Maximum capacity for beluga given their 16GB of RAM for the GPUs
-
     samples = torch.empty(size = (num_samples, img_size**2), requires_grad = False).to(device)
     
     for i in tqdm(range(int(num_samples//samples_per_loop))):
@@ -140,7 +143,7 @@ def main(args):
                     noise = diffusion * (-dt) ** 0.5 * z
                     x = x_mean + noise
                     t += dt
-            return x_mean
+            return link_function(x_mean)
 
         def euler_sampler(num_samples, num_steps, score_function, img_size = 28): 
             t = torch.ones(size = (num_samples, 1)).to(device)
@@ -159,22 +162,35 @@ def main(args):
             
             return link_function(x_mean)
 
-
-        #pc_samples = pc_sampler(num_samples = 100, num_pred_steps = 500, num_corr_steps = 20, snr = 1e-2, score_function = score_posterior, img_size = 28)
-        euler_samples = euler_sampler(num_samples = samples_per_loop, num_steps = num_iters, score_function = score_posterior, img_size = img_size)
-        samples[i*20:(i+1)*20] = euler_samples
+        if args.sampler == "euler": 
+            samples_loop = euler_sampler(num_samples = samples_per_loop, num_steps = num_iters, score_function = score_posterior, img_size = img_size)
+        elif args.sampler == "pc":
+            samples_loop = pc_sampler(num_samples = samples_per_loop, num_pred_steps = num_iters, num_corr_steps = args.num_corr_steps, snr = args.snr, score_function = score_posterior, img_size = img_size)
+            path = folder_dir
+        samples[i*samples_per_loop:(i+1)*samples_per_loop] = samples_loop
     
-    path = f"../../"+ args.samples_folder + f"/sigma_{sigma_likelihood:.1g}/"
-    torch.save(samples, path + f"idx_{idx}.pt")
+    #path = f"../../"+ args.samples_folder + f"/sigma_{sigma_likelihood:.1g}/"
+    torch.save(samples, path + f"/idx_{idx}.pt")
 
 if __name__ == '__main__':
     from argparse import ArgumentParser
     parser = ArgumentParser()
 
-    parser.add_argument("--sigma_likelihood",   required = True,   type = float,   help = "The square root of the multiplier of the isotropic gaussian matrix")
-    parser.add_argument("--num_iters",          required = False,   default = 1000,   type = int,    help ="Number of iterations in the loop to compute the reverse sde")
-    parser.add_argument("--num_samples",        required = False,   default = 20,  type = int,    help = "Number of samples of the posterior distribution calculated")
-    parser.add_argument("--idx",                required = False,    default = 0,   type = int)
-    parser.add_argument("--samples_folder",        required = False,    default ="samples_probes")
+    # Likelihood parameters
+    parser.add_argument("--sigma_likelihood",   required = True,                    type = float,   help = "The square root of the multiplier of the isotropic gaussian matrix")
+    
+    # Sampling parameters
+    parser.add_argument("--sampler",            required = False,   default = "pc", type = str,      help = "Sampling procedure used ('pc' or 'euler')")
+    parser.add_argument("--num_samples",        required = False,   default = 20,   type = int,     help = "Number of samples from the posterior to create")
+    parser.add_argument("--num_iters",          required = False,   default = 1000, type = int,     help ="Number of iterations in the loop to compute the reverse sde")
+    parser.add_argument("--num_corr_steps",     required = False,   default = 20,   type = int,     help ="Number of iterations in the loop to compute the reverse sde")
+    parser.add_argument("--snr",                required = False,   default = 1e-2, type = float)
+    
+    # Ground-truth parameters
+    parser.add_argument("--idx",                required = False,   default = 0,    type = int,     help = "Idx of the image in the probes dataset (between 0 and approx 2000)")
+
+    # Output files parameter
+    parser.add_argument("--samples_folder",     required = False,   default ="samples_probes",      help = "Folder where to save the samples")
+    
     args = parser.parse_args()
     main(args) 
