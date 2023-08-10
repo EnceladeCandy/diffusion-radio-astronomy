@@ -10,9 +10,10 @@ from score_models import ScoreModel, NCSNpp
 import json
 import os
 import sys
+import matplotlib.pyplot as plt
 sys.path.append("../..")
 
-from utils import link_function, probes_256, fits_to_tensor, resize
+from utils import link_function, probes_256, fits_to_tensor, resize, probes_64
 
 # total number of slurm workers detected
 # defaults to 1 if not running under SLURM
@@ -61,11 +62,10 @@ def main(args):
         # Loading the psf
         #path_ms + "_psf.fits").
         ms = args.ms
-        header_psf, psf = fits_to_tensor("../../data_targets2/" + ms + "_psf.fits")
-        
+        header_psf, psf = fits_to_tensor("../../data_targets2/" + ms + ".fits")
+    
         psf = resize(psf, target_size = 64).to(device)
-        img = torch.tensor(dataset[idx])[..., 1] # green 
-        img = resize(img, target_size = 64).to(device)
+        img = probes_64(dataset, idx).to(device)
     
     elif img_size == 256: 
         # Importing the models hparams, weights + loading them
@@ -85,6 +85,9 @@ def main(args):
 
     def ft(x): 
         return torch.fft.fft2(x, norm = "ortho")
+
+    def ift(x):
+        return torch.fft.ifft2(x, norm = "ortho")
 
     vis_full = ft(img).flatten()
     sampling_function= ft(torch.fft.ifftshift(psf)).flatten()
@@ -135,7 +138,7 @@ def main(args):
         x = torch.randn([num_samples, img_size ** 2]).to(device)
         dt = -1/num_pred_steps
         with torch.no_grad(): 
-            for _ in range(num_pred_steps-1): 
+            for i in tqdm(range(num_pred_steps-1)): 
                 # Corrector step: (Only if we are not at 0 temperature )
                 gradient = score_function(x, t)
                 for _ in range(num_corr_steps): 
@@ -162,7 +165,7 @@ def main(args):
         x = sigma_max * torch.randn([num_samples, img_size ** 2]).to(device)
         dt = -1/num_steps
         with torch.no_grad(): 
-            for _ in range(num_steps - 1): 
+            for i in tqdm(range(num_steps - 1)): 
                 z = torch.randn_like(x).to(device)
                 gradient = score_function(x, t)
                 drift = 0
@@ -181,7 +184,7 @@ def main(args):
     num_samples = args.num_samples
 
 
-    batch_size = 1 # Maximum number of posterior samples per gpu with 16GB (beluga)
+    batch_size = args.batchsize # Maximum number of posterior samples per gpu with 16GB (beluga)
     samples_tot = torch.empty(size = (num_samples, img_size, img_size))
 
 
@@ -214,7 +217,7 @@ def main(args):
                 img_size = img_size
             )
             # Filling gradually the samples
-            samples_tot[i * batch_size : (i + 1) * batch_size] = samples
+            samples_tot[i * batch_size : (i + 1) * batch_size] = samples.reshape(-1, img_size, img_size)
 
         # Saving 
         folder_dir = f"../../samples_probes/pc/corr_{corr}_snr{snr}"
@@ -226,7 +229,16 @@ def main(args):
     else: 
         raise ValueError("The sampler does not exist ! Use either 'pc' or 'euler'")
     
-
+    vis_gridded = y[:int(img_size**2)] + 1j * y[int(img_size**2):]
+    dirty_image = ift(vis_gridded.reshape(img_size, img_size))
+    fig, axs = plt.subplots(1, 10, figsize = (10*3.5, 3.5))
+    for i in range(len(axs)):
+        axs[i].axis("off")
+    axs[0].imshow(img.cpu(), cmap = "magma")
+    axs[1].imshow(dirty_image.real.cpu(), cmap = "magma")
+    for i in range(8):
+        axs[i+2].imshow(samples_tot[i].cpu(), cmap = "magma")
+    plt.savefig("../../images/sanity.jpeg", bbox_inches="tight", pad_inches = 0.2)
 if __name__ == '__main__':
     from argparse import ArgumentParser
     parser = ArgumentParser()
@@ -245,5 +257,6 @@ if __name__ == '__main__':
     # Ground-truth parameters
     parser.add_argument("--ms",                required = False,   default = "HTLup_COcube" ,    type = str,     help = "Name of the target") 
     
+    parser.add_argument("--batchsize",          required = False,  type = int,  default = 1)
     args = parser.parse_args()
     main(args) 
