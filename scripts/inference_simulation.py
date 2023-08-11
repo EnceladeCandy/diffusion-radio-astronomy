@@ -229,6 +229,7 @@ def main(args):
     else: 
         raise ValueError("The sampler does not exist ! Use either 'pc' or 'euler'")
     
+    """
     vis_gridded = y[:int(img_size**2)] + 1j * y[int(img_size**2):]
     dirty_image = ift(vis_gridded.reshape(img_size, img_size))
     fig, axs = plt.subplots(1, 10, figsize = (10*3.5, 3.5))
@@ -239,6 +240,7 @@ def main(args):
     for i in range(8):
         axs[i+2].imshow(samples_tot[i].cpu(), cmap = "magma")
     plt.savefig("../../images/sanity.jpeg", bbox_inches="tight", pad_inches = 0.2)
+    """
 if __name__ == '__main__':
     from argparse import ArgumentParser
     parser = ArgumentParser()

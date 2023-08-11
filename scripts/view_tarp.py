@@ -37,7 +37,7 @@ def main(args):
     for i in tqdm(range(num_sims)):
         samples[:, i, :] = torch.load(path + "/" + samples_files[i], map_location=torch.device(device)).flatten(start_dim = 1)
         k = int(samples_files[i].split("_")[-1].replace(".pt", ""))
-        theta[i, :] = resize(torch.tensor(dataset[k, ..., 1]), target_size=64).flatten()
+        theta[i, :] = resize(torch.tensor(dataset[k, ...,1]), target_size=64).flatten()
 
     # tarp is coded for numpy
     samples = samples.numpy()
