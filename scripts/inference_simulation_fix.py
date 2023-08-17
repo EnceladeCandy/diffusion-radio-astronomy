@@ -45,7 +45,6 @@ dataset = hdf['galaxies']
 
 def main(args):
     
-
     if N_WORKERS!=1: 
         idx = THIS_WORKER
     else: 
@@ -88,43 +87,57 @@ def main(args):
 
     def ift(x):
         return torch.fft.ifft2(x, norm = "ortho")
-
+    
+    # Creating an observation: 
     vis_full = ft(img).flatten()
-    sampling_function= ft(torch.fft.ifftshift(psf)).flatten()
+    S= ft(torch.fft.ifftshift(psf)).flatten()
+    vis_sampled = S * vis_full
 
-    # To prevent problems with grad for complex functions in torch
-    real_part = sampling_function.real * vis_full.real - sampling_function.imag * vis_full.imag
-    im_part = sampling_function.real * vis_full.imag + sampling_function.imag * vis_full.real
-    vis_sampled = torch.cat([real_part, im_part])
+    vis_sampled = vis_sampled.flatten()
 
+
+    D = len(vis_sampled) # Dimension of the observation
+
+    # Additive gaussian noise: 
     sigma_likelihood = args.sigma_likelihood
-    
-    y = vis_sampled + sigma_likelihood * torch.randn_like(vis_sampled)
+    real_noise = sigma_likelihood * torch.randn(D).to(device) # first realization
+    im_noise = sigma_likelihood * torch.randn(D).to(device) # second realization
+    eta = real_noise + 1j * im_noise 
+    y = vis_sampled + eta 
     
 
-    
+    beta = 0
+    def sigma(t): 
+        return sigma_min * (sigma_max/sigma_min) ** t
+
+
     def model(x):
         x = link_function(x)
         vis_full = ft(x.reshape(img_size, img_size)).flatten()
-        sampling_function= ft(torch.fft.ifftshift(psf)).flatten()
-
-        # To prevent problems with grad for complex functions in torch
-        real_part = sampling_function.real * vis_full.real - sampling_function.imag * vis_full.imag
-        im_part = sampling_function.real * vis_full.imag + sampling_function.imag * vis_full.real
-        vis_sampled = torch.cat([real_part, im_part])
+        vis_sampled = S * vis_full
         return vis_sampled
 
-    # VE SDE
-    def sigma(t): 
-        return sigma_min * (sigma_max/sigma_min) ** t
-    
-    def logprob_likelihood(x, sigma): 
-      D = x.shape[-1]
-      val = -torch.sum(x**2, axis = -1)/(2*sigma**2) - D/2 * np.log((2*torch.pi))- D * torch.log(sigma)
-      return val.squeeze(0) # needs to be without diemensions   
+    def logprob_likelihood(x, sigmas): 
+        """Calculate the log-likelihood of a Multivariate Gaussian for a diagonal covariance matrix
 
+        Args:
+            x: point where we want to compute the log-likelihood
+            sigmas: Tensor containing the elements of the diagonal of the covariance matrix 
+
+        Returns:
+            log-likelihood
+        """
+
+        D = x.shape[-1]
+        val = - (x.conj().t() * 1/sigmas ) @ x # - D/2 * np.log(2*np.pi) - 1/2 * torch.log(torch.prod(sigmas))
+        return val.squeeze(0)
+
+
+    # GIVE THE GOOD COVARIANCE MATRIX
     def score_likelihood(x, t): 
-        return vmap(grad(lambda x, t: logprob_likelihood(y -model(x), (sigma_likelihood ** 2 + sigma(t)** 2)**0.5)))(x, t)
+        I = torch.ones(D).to(device)
+        return vmap(grad(lambda x, t: logprob_likelihood(y -model(x), sigma_likelihood ** 2 * I + sigma(t)**2 * (S.abs()**2) + beta * I)))(x, t)
+        
 
     def score_posterior(x, t): 
         return score_model.score(t, x.reshape(-1, 1, img_size, img_size)).flatten(start_dim = 1) + score_likelihood(x, t)
@@ -173,6 +186,7 @@ def main(args):
                 noise = diffusion * (-dt) ** 0.5 * z
                 x = x_mean + noise
                 t += dt
+            
         
         return link_function(x_mean)
 
@@ -215,6 +229,7 @@ def main(args):
                 score_function = score_posterior,
                 img_size = img_size
             )
+           
             # Filling gradually the samples
             samples_tot[i * batch_size : (i + 1) * batch_size] = samples.reshape(-1, img_size, img_size)
 
@@ -229,15 +244,18 @@ def main(args):
         raise ValueError("The sampler does not exist ! Use either 'pc' or 'euler'")
     
     
-    vis_gridded = y[:int(img_size**2)] + 1j * y[int(img_size**2):]
+    vis_gridded = y
     dirty_image = ift(vis_gridded.reshape(img_size, img_size))
     fig, axs = plt.subplots(1, 10, figsize = (10*3.5, 3.5))
     for i in range(len(axs)):
         axs[i].axis("off")
-    axs[0].imshow(img.cpu(), cmap = "magma")
+    im = axs[0].imshow(img.cpu(), cmap = "magma")
+    plt.colorbar(im, fraction = 0.046)
     axs[1].imshow(dirty_image.real.cpu(), cmap = "magma")
     for i in range(8):
-        axs[i+2].imshow(samples_tot[i].cpu(), cmap = "magma")
+        im = axs[i+2].imshow(samples_tot[i].cpu(), cmap = "magma")
+        plt.colorbar(im, fraction = 0.046)
+    plt.subplots_adjust(wspace = 0.4)
     plt.savefig("../../images/sanity.jpeg", bbox_inches="tight", pad_inches = 0.2)
     
     
@@ -256,6 +274,7 @@ if __name__ == '__main__':
     parser.add_argument("--snr",                required = False,   default = 1e-2, type = float)
     
     parser.add_argument("--sim_size",           required = True,   type = int)
+    
     # Ground-truth parameters
     parser.add_argument("--ms",                required = False,   default = "HTLup_COcube" ,    type = str,     help = "Name of the target") 
     

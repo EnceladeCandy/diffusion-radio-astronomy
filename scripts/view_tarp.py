@@ -26,7 +26,6 @@ def main(args):
     path = f"../../samples_probes/{sampler}"
     samples_files = os.listdir(path)
 
-    batch_size = 250
     num_samples = 1000
     num_sims = len(samples_files)
     num_dims = img_size ** 2
@@ -37,7 +36,7 @@ def main(args):
     for i in tqdm(range(num_sims)):
         samples[:, i, :] = torch.load(path + "/" + samples_files[i], map_location=torch.device(device)).flatten(start_dim = 1)
         k = int(samples_files[i].split("_")[-1].replace(".pt", ""))
-        theta[i, :] = resize(torch.tensor(dataset[k, ...,1]), target_size=64).flatten()
+        theta[i, :] = probes_64(dataset, k).flatten()
 
     # tarp is coded for numpy
     samples = samples.numpy()
@@ -57,7 +56,6 @@ def main(args):
     
     plt.savefig("../../images/tarp/sanity.jpeg", bbox_inches="tight", pad_inches=0.2)
     print("Running the tarp test...")
-    print(samples.shape, theta.shape)
     
     
     if args.bootstrapping: 
@@ -76,7 +74,7 @@ def main(args):
         plt.title(args.title, fontsize = 10)
     else: 
         print("Applying a regular method")
-        ecp, alpha = get_drp_coverage(samples, theta, references = "random", metric = "euclidean", norm = False)
+        ecp, alpha = get_drp_coverage(samples, theta, references = "random", metric = "euclidean", norm = True)
         #ecp, alpha = np.insert(ecp, 0, 0), np.insert(alpha, 0, 0)
         print(ecp.shape)
         fig, ax = plt.subplots(1, 1, figsize=(6, 6), dpi = 150)
@@ -88,7 +86,7 @@ def main(args):
         plt.title(args.title, fontsize = 10)
     
     
-    plt.savefig("../../images/tarp/test_euler.jpeg", bbox_inches = "tight", pad_inches = 0.2)
+    plt.savefig("../../images/tarp/test2_euler.jpeg", bbox_inches = "tight", pad_inches = 0.2)
 
 
 if __name__ == '__main__':

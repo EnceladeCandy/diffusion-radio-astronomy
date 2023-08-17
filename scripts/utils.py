@@ -35,9 +35,13 @@ def probes_64(dataset, idx):
 def probes_256(dataset, idx): 
     img = torch.tensor(dataset[idx, ..., 1])
     img = preprocess_probes_g_channel(img, inv_link = False)
+    return img
 
 def fits_to_tensor(file): 
     with fits.open(file) as hdul: 
         header = hdul[0].header
         data = torch.tensor((hdul[0].data).astype(np.float32))[0,0, ...].to(device)
     return header, data
+
+def ft(x): 
+    return torch.fft.fft2(x, norm = "ortho")
