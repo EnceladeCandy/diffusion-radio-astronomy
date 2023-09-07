@@ -277,7 +277,6 @@ if __name__ == '__main__':
     
     # Ground-truth parameters
     parser.add_argument("--ms",                required = False,   default = "HTLup_COcube" ,    type = str,     help = "Name of the target") 
-    
-    parser.add_argument("--batchsize",          required = False,  type = int,  default = 1)
+    parser.add_argument("--batchsize",         required = False,  type = int,  default = 1)
     args = parser.parse_args()
     main(args) 
