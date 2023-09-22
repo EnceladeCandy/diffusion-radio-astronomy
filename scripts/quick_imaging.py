@@ -33,10 +33,11 @@ def quick_clean(vis, overwrite=True, index=None):
         datacolumn="data",
         imsize=(img_size, img_size),
         cell=[size, size],
-        niter=0,  # creates dirty image
+        niter=200, 
+        nterms = 2, 
+        deconvolver = "mtmfs",
         calcpsf=True, 
-        weighting = "briggs",
-        robust = 0.5
+        weighting = "natural",
     )
     return image_name
 
