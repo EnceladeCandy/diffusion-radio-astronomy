@@ -43,7 +43,12 @@ def main(args):
 
     # Choosing a specific spectral window
     indices = vis_per_spw.cumsum()
-    spw = THIS_WORKER
+
+    if N_WORKERS>1:
+        spw = THIS_WORKER
+
+    else: 
+        spw = args.spw
 
     if spw == 0: 
         idx_inf = 0
@@ -106,35 +111,73 @@ def main(args):
 
     # Gridding visibilities
     pixel_scale = 0.0015
-    img_size = 256
+    npix = args.npix # To have a finer grid make it bigger than img_size
+    img_size = 256 # fixed for this score model
     u_edges, v_edges = grid(pixel_scale = pixel_scale, img_size = img_size)
 
+    def process_binstat(data, weight):
+        y = list(zip(data, weight))
+        out = np.empty(len(data), dtype = object)
+        out[:] = y
+        return out
+
+    data_real = process_binstat(vis_re, weight_)
+    data_imag = process_binstat(vis_imag, weight_)
+
+    
+
+    def binned_mean(y):
+        y = np.stack(y)
+        values = y[:, 0]
+        w = y[:, 1]
+        return np.average(values, weights = w)
+
+    def binned_std(y):
+        y = np.stack(y)
+        values = y[:, 0]
+        w = y[:, 1]
+        return np.sqrt(np.cov(values, aweights=w)) #have to use cov since std doesn't accept weights :(
+    
     bin_x = u_edges
     bin_y = v_edges
-    vis_gridded_re, edgex, edgey, binnumber = binned_statistic_2d(vv, uu, vis_re, "mean", (bin_y, bin_x))
-    vis_gridded_img, edgex, edgey, binnumber = binned_statistic_2d(vv, uu, vis_imag, "mean", (bin_y, bin_x))
+    vis_bin_re, _, _, _ = binned_statistic_2d(vv, uu, values = data_real, bins = (bin_y, bin_x), statistic = binned_mean)
+    vis_bin_img, _, _, _ = binned_statistic_2d(vv, uu, values = data_imag, bins = (bin_y, bin_x), statistic = binned_mean)
+    std_bin_re, _, _, _ = binned_statistic_2d(vv, uu, values = data_real, bins = (bin_y, bin_x), statistic = binned_std)
+    std_bin_img, _, _, _ = binned_statistic_2d(vv, uu, values = data_imag, bins = (bin_y, bin_x), statistic = binned_std)
+    counts, _, _, _ = binned_statistic_2d(vv, uu, values = weight_, bins = (bin_y, bin_x), statistic = "count")
 
-    std_gridded_re, edgex, edgey, binnumber = binned_statistic_2d(vv, uu, vis_re, "std", (bin_y, bin_x))
-    std_gridded_img, edgex, edgey, binnumber = binned_statistic_2d(vv, uu, vis_imag, "std", (bin_y, bin_x))
 
-    count, edgex, edgey, binnumber = binned_statistic_2d(vv, uu, vis_imag, "count", (bin_y, bin_x))
+    # From object type to float
+    vis_bin_re = vis_bin_re.astype(float)
+    vis_bin_img = vis_bin_img.astype(float)
+    std_bin_re = std_bin_re.astype(float) 
+    std_bin_img = std_bin_img.astype(float)
+    counts = counts.astype(float)
 
-    vis_gridded_re[np.isnan(vis_gridded_re)] = 0
-    vis_gridded_img[np.isnan(vis_gridded_img)] = 0
+    # i.e. The sampling function where there is data in the uv plane
+    mask = counts>0 
 
-    std_gridded_re[np.isnan(std_gridded_re)] = 0
-    std_gridded_img[np.isnan(std_gridded_img)] = 0
+    # binned_stat outputs nans, we put everything to zero instead
+    vis_bin_re[~mask] = 0.
+    vis_bin_img[~mask] = 0.
+    std_bin_re[~mask] = 0.
+    std_bin_img[~mask] = 0.
+    counts[~mask] = 0.
 
-    vis_grid = vis_gridded_re + 1j * vis_gridded_img
-    vis_gridded_re, vis_gridded_img = np.fft.fftshift(vis_gridded_re).flatten(), np.fft.fftshift(vis_gridded_img).flatten()
-    std_gridded_re, std_gridded_img = np.fft.fftshift(std_gridded_re).flatten(), np.fft.fftshift(std_gridded_img).flatten()
-    count = np.fft.fftshift(count).flatten()
+    std_bin_re /= (counts + 1)**0.5
+    std_bin_img /= (counts + 1)**0.5
 
-    std_gridded_re /= (count + 1) ** 0.5
-    std_gridded_img /= (count + 1) ** 0.5
-    S_grid = std_gridded_re.astype(bool)
+    # Computing the dirty image: 
+    vis_grid = np.fft.fftshift(vis_bin_re + 1j * vis_bin_img)
+    dirty_image = npix**2 * flip(np.fft.fftshift(np.fft.ifft2(np.fft.fftshift(vis_grid))))
 
-    dirty_image = flip(np.fft.fftshift(np.fft.ifft2(np.fft.fftshift(vis_grid))))
+    # For the inference, fftshift + flatten everything for the fft
+    vis_gridded_re = np.fft.fftshift(vis_bin_re).flatten()
+    vis_gridded_img = np.fft.fftshift(vis_bin_img).flatten()
+    std_gridded_re = np.fft.fftshift(std_bin_re).flatten()
+    std_gridded_img = np.fft.fftshift(std_bin_re).flatten()
+    S_grid = np.fft.fftshift(mask).flatten()
+
     # Numpy to torch: 
     S_cat = np.concatenate([S_grid, S_grid])
     vis_gridded = np.concatenate([vis_gridded_re, vis_gridded_img])
@@ -145,19 +188,27 @@ def main(args):
     sigma_y = torch.tensor(std_gridded, device = S.device)[S].to(device) * img_size 
 
 
+    def noise_padding(x, pad, sigma):
+        H, W = x.shape
+        out = torch.nn.functional.pad(x, (pad, pad, pad, pad)) 
+        # Create a mask for padding region
+        mask = torch.ones_like(out)
+        mask[pad:pad + H, pad:pad+W] = 0.
+        # Noise pad around the model
+        z = torch.randn_like(out) * sigma
+        out = out + z * mask
+        return out
 
     def sigma(t): 
         return sigma_min * (sigma_max/sigma_min) ** t
 
-
-    def model(x):
+    def model(x, t):
         x = x.reshape(img_size, img_size) # for the FFT 
         x = link_function(x) # map from model unit space to real unit space
-        x = torch.flip(x, dims = (1,))
-
         # Padding: 
-        #pad_size = int((npix - img_size)/2)
+        pad_size = int((npix - img_size)/2)
         #x = torch.nn.functional.pad(x, (pad_size, pad_size, pad_size, pad_size)) 
+        x = noise_padding(x, pad = pad_size, sigma = sigma(t))
         vis_full = ft(torch.fft.fftshift(x)).flatten() 
         vis_sampled = vis_full
         vis_sampled = torch.cat([vis_sampled.real, vis_sampled.imag])
@@ -176,7 +227,7 @@ def main(args):
         Returns: 
             log-likelihood of a gaussian distribution
         """ 
-        y_hat = model(x)
+        y_hat = model(x, t)
         var = sigma(t) **2 / 2  + sigma_y**2
         log_prob = -0.5 * torch.sum((y - y_hat)**2 / var)
         return log_prob
@@ -185,7 +236,8 @@ def main(args):
     # GIVE THE GOOD COVARIANCE MATRIX
     def score_likelihood(y, x, t, sigma_y): 
         x = x.flatten(start_dim = 1) 
-        return vmap(grad(lambda x, t: log_likelihood(y, x, t, sigma_y)))(x, t)
+        return vmap(grad(lambda x, t: log_likelihood(y, x, t, sigma_y)), randomness = "different")(x, t)
+
 
     #torch.manual_seed(0)
     def score_posterior(x, t): 
@@ -274,7 +326,7 @@ def main(args):
             samples_tot[i * batch_size : (i + 1) * batch_size] = samples.reshape(-1, img_size, img_size)
 
         # Saving 
-        folder_dir = f"../../results/euler/spw_{spw}"
+        folder_dir = f"../../results/noise_pad/euler/spw_{spw}"
         if not os.path.exists(folder_dir):
             os.makedirs(folder_dir)
         torch.save(samples_tot, folder_dir + f"/{num_samples}samples.pt")
@@ -293,7 +345,7 @@ def main(args):
             samples_tot[i * batch_size : (i + 1) * batch_size] = samples.reshape(-1, img_size, img_size)
 
         # Saving 
-        folder_dir = f"../../results/pc/spw_{spw}"
+        folder_dir = f"../../results/noise_pad/pc/spw_{spw}"
         if not os.path.exists(folder_dir):
             os.makedirs(folder_dir)
         torch.save(samples_tot, folder_dir + f"/{num_samples}samples.pt")
@@ -301,11 +353,7 @@ def main(args):
     else: 
         raise ValueError("The sampler specified is not implemented or does not exist. Choose between 'euler' and 'pc'")
 
-    # Plotting the dirty image, for my sanity
-    fig = plt.figure(figsize = (8, 8), dpi = 200)
-    plt.imshow(dirty_image.real, cmap = "magma", origin = "lower")
-    plt.axis("off")
-    plt.savefig(folder_dir + "/dirty_image.jpeg", bbox_inches = "tight", pad_inches = 0.01)
+    np.save("dirty_image.npy", dirty_image)
 
     
 
@@ -321,5 +369,6 @@ if __name__ == "__main__":
     parser.add_argument("--num_corr",           required = False,   default = 20,   type = int,     help ="Number of corrector steps for the PC sampling")
     parser.add_argument("--snr",                required = False,   default = 1e-2, type = float,   help = "Signal-to-noise ratio for the PC sampling")
     parser.add_argument("--batchsize",          required = True,    default = 25,   type = int,     help = "Number of samples created per iteration")
+    parser.add_argument("--spw",                required = False,   default = 10,   type = int,     help = "Spectral window to select from the measurement set"  )
     args = parser.parse_args()
     main(args) 
