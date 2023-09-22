@@ -20,11 +20,10 @@ sigma_rescale_spw = []
 
 # for a given spw
 for spw in spws:
-    # calculate rescale factor and replot
+    # calculate rescale factor from CLEAN's results
     sigma_rescale = scatter.get_sigma_rescale_datadescid(fname, spw)
 
-    # get processed visibilities
-    # including complex conjugation
+    # Get visibilities
     d = process.get_processed_visibilities(fname, spw, sigma_rescale=1.0)
     
     # flatten and concatenate
@@ -37,9 +36,11 @@ for spw in spws:
     # Broadcasting shapes so that they are (nchan, N_vis) == flag.shape
     weight = d["weight"] 
     broadcasted_weight = weight * np.ones(shape = (nchan, weight.shape[0]))
-    u, v = process.broadcast_and_convert_baselines(u, v, chan_freq) #klambda
+
+    # Convert the uv points to klambdas given the channel frequency
+    u, v = process.broadcast_and_convert_baselines(u, v, chan_freq) 
     
-    # Applying the flag mask makes flattens each array:
+    # Applying the flag mask flattens each array:
     uu.append(u[~flag])
     vv.append(v[~flag])
     weight_ls.append(broadcasted_weight[~flag])
