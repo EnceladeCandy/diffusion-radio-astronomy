@@ -24,6 +24,7 @@ def main(args):
     # Importing and loading the weights of the score of the prior 
     score_model = ScoreModel(checkpoints_directory=args.prior)
     S = torch.tensor(np.load(args.sampling_function).astype(bool)).to(device)
+    img_size = args.model_pixels
     
     def sigma(t):
         return score_model.sde.sigma(t)
@@ -54,6 +55,7 @@ def main(args):
     
     C = 1 # VP prior
     B = 0 # VP
+
     def link_function(x):
         return C * x + B
 
@@ -78,7 +80,7 @@ def main(args):
         x = x.flatten(start_dim = 1)
         return vmap(grad(lambda x, t: log_likelihood(y, x, t, sigma_y)), randomness = "different")(x, t)
     
-    def score_posterior(x, t): 
+    def score_posterior(y, x, t, sigma_y): 
         x = x.reshape(-1, 1, img_size, img_size)
         return score_model.score(t, x).flatten(start_dim = 1) + score_likelihood(y, x, t, sigma_y) 
 
@@ -88,14 +90,14 @@ def main(args):
     def drift_fn(t, x):
         return score_model.sde.drift(t, x)
 
-    def pc_sampler(num_samples, num_pred_steps, num_corr_steps, score_function, snr = 1e-2, img_size = 28): 
+    def pc_sampler(y, sigma_y, num_samples, num_pred_steps, num_corr_steps, score_function, snr = 1e-2, img_size = 28): 
         t = torch.ones(size = (num_samples, 1)).to(device)
         x = torch.randn([num_samples, img_size ** 2]).to(device)
         dt = -1/num_pred_steps
         with torch.no_grad(): 
             for _ in range(num_pred_steps-1): 
                 # Corrector step: (Only if we are not at 0 temperature )
-                gradient = score_function(x, t)
+                gradient = score_function(y, x, t, sigma_y)
                 for _ in range(num_corr_steps): 
                     z = torch.randn_like(x)
                     grad_norm = torch.mean(torch.norm(gradient, dim = -1)) # mean of the norm of the score over the batch 
@@ -106,31 +108,31 @@ def main(args):
             
                 # Predictor step: 
                 z = torch.randn_like(x).to(device)
-                gradient = score_function(x, t)
+                gradient = score_function(y, x, t, sigma_y)
                 drift = drift_fn(t, x)
                 diffusion = g(t, x)
-                x_mean = x - diffusion**2 * gradient * dt  
+                x_mean = x + drift * dt - diffusion**2 * gradient * dt  
                 noise = diffusion * (-dt) ** 0.5 * z
                 x = x_mean + noise
                 t += dt
-        return link_function(x_mean)
+        return link_function(x_mean).reshape(-1, 1, img_size, img_size)
 
-    def euler_sampler(num_samples, num_steps, score_function, img_size = 28): 
+    def euler_sampler(y, sigma_y, num_samples, num_steps, score_function, img_size = 28): 
         t = torch.ones(size = (num_samples, 1)).to(device)
-        x = sigma_max * torch.randn([num_samples, img_size ** 2]).to(device)
+        x = sigma(t) * torch.randn([num_samples, img_size ** 2]).to(device)
         dt = -1/num_steps
         with torch.no_grad(): 
             for _ in tqdm(range(num_steps - 1)): 
                 z = torch.randn_like(x).to(device)
-                gradient = score_function(x, t)
+                gradient = score_function(y, x, t, sigma_y)
                 drift = drift_fn(t, x)
                 diffusion = g(t, x)
-                x_mean = x - diffusion**2 * gradient * dt  
+                x_mean = x + drift * dt - diffusion**2 * gradient * dt  
                 noise = diffusion * (-dt) ** 0.5 * z
                 x = x_mean + noise
                 t += dt
         
-        return link_function(x_mean)
+        return link_function(x_mean).reshape(-1, 1, img_size, img_size)
 
     sampler = args.sampler
     pred = args.num_pred
@@ -140,21 +142,24 @@ def main(args):
     batch_size = args.batch_size
     num_samples = args.num_samples
    
-    filename = os.path.join(args.result_dir, args.experiment_name + f"_{THIS_WORKER}" + ".h5")
-    with h5py.File(filename, "w"):
+    filename = os.path.join(args.results_dir, args.experiment_name + f"_{THIS_WORKER}" + ".h5")
+    with h5py.File(filename, "w") as hf:
         hf.create_dataset("model", [args.num_samples, 1, args.model_pixels, args.model_pixels], dtype=np.float32)
 
-        ground_truth = score_model.sample([1, 1, args.model_pixels, args.model_pixels], steps=pred)
-        observation = model(ground_truth)
-        observation += torch.randn_like(observation) * args.sigma_likelihood
+        ground_truth = score_model.sample(n = 1, shape = [1, args.model_pixels, args.model_pixels], steps=pred)
+        observation = model(x = ground_truth.flatten(), t = torch.zeros(1).to(device))
+        sigma_y = args.sigma_likelihood
+        observation += torch.randn_like(observation) * sigma_y
 
         hf.create_dataset("reconstruction", [args.num_samples, *observation.shape[1:]], dtype=np.float32)
         hf["observation"] = observation.cpu().numpy().astype(np.float32).squeeze()
         hf["ground_truth"] = ground_truth.cpu().numpy().astype(np.float32).squeeze()
         
-        for i in tqdm(range(int(num_samples//batch_size))):
+        for i in range(int(num_samples//batch_size)):
             if sampler.lower() == "euler":    
                 samples = euler_sampler(
+                    y = observation,
+                    sigma_y = sigma_y,
                     num_samples = batch_size,
                     num_steps = pred, 
                     score_function = score_posterior, 
@@ -163,6 +168,8 @@ def main(args):
 
             elif sampler.lower() == "pc":
                 samples = pc_sampler(
+                    y = observation,
+                    sigma_y = sigma_y,
                     num_samples = batch_size,
                     num_pred_steps = pred,
                     num_corr_steps = corr,
@@ -173,7 +180,7 @@ def main(args):
 
             B = batch_size
             hf["model"][i*B: (i+1)*B] = samples.cpu().numpy().astype(np.float32)
-            y_hat = model(samples)
+            y_hat = model(samples, torch.zeros(1).to(device))
             hf["reconstruction"][i*B: (i+1)*B] = y_hat.cpu().numpy().astype(np.float32)
 
         else: 
@@ -187,21 +194,21 @@ if __name__ == "__main__":
     # Likelihood parameters
     parser.add_argument("--sigma_likelihood",   required = True,                    type = float,   help = "The square root of the multiplier of the isotropic gaussian matrix")
     
-    parser.add_argument("--results_dir", required=True, help="Directory where to save the TARP files")
-    parser.add_argument("--experiment_name", required=True, help="Prefix for the name of the file")
+    parser.add_argument("--results_dir",        required=True, help="Directory where to save the TARP files")
+    parser.add_argument("--experiment_name",    required=True, help="Prefix for the name of the file")
     
-    parser.add_argument("--model_pixels", required=True, type=int)
+    parser.add_argument("--model_pixels",       required=True, type=int)
     
     # Sampling parameters
     parser.add_argument("--sampler",            required = False,   default = "pc", type = str,      help = "Sampling procedure used ('pc' or 'euler')")
     parser.add_argument("--num_samples",        required = False,   default = 20,   type = int,     help = "Number of samples from the posterior to create")
-    parser.add_argument("--batch_size",         required = false,   default=20, type=int)
-    parser.add_argument("--num_pred",          required = False,   default = 1000, type = int,     help ="Number of iterations in the loop to compute the reverse sde")
-    parser.add_argument("--num_corr",     required = False,   default = 20,   type = int,     help ="Number of iterations in the loop to compute the reverse sde")
+    parser.add_argument("--batch_size",         required = False,   default=20, type=int)
+    parser.add_argument("--num_pred",           required = False,   default = 1000, type = int,     help ="Number of iterations in the loop to compute the reverse sde")
+    parser.add_argument("--num_corr",           required = False,   default = 20,   type = int,     help ="Number of iterations in the loop to compute the reverse sde")
     parser.add_argument("--snr",                required = False,   default = 1e-2, type = float)
     parser.add_argument("--pad",                required = False,   default = 0, type = int)
-    parser.add_argument("--sampling_function", required=True)
-    parser.add_argument("--prior", required=True)
+    parser.add_argument("--sampling_function",  required=True)
+    parser.add_argument("--prior",              required=True)
     
     args = parser.parse_args()
     main(args) 
