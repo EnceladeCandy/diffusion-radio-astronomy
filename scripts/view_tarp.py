@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np 
 import os
 import torch
+from glob import glob
 import h5py
 from tqdm import tqdm
 import torch.nn.functional as F
@@ -12,6 +13,13 @@ from tarp_perso import bootstrapping, get_drp_coverage
 
 def main(args):
     device = "cuda" if torch.cuda.is_available() else "cpu"
+
+
+    # pattern = "tarp_posterior*.h5"
+    # paths = glob(os.path.join(args.result_dir, args.pattern))
+    # for path in paths:
+        # hf = hyp5.File(path, "r")
+        # # do some stuff
 
 
     # Importing the dataset
