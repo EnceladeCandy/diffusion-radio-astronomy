@@ -135,9 +135,6 @@ def main(args):
                 x = x_mean + noise
                 t += dt
 
-                if i==50:
-                    break
-
         return link_function(x_mean).reshape(-1, 1, img_size, img_size)
 
     sampler = args.sampler
@@ -148,7 +145,7 @@ def main(args):
     batch_size = args.batch_size
     num_samples = args.num_samples
     
-    path = args.results_dir + f"/{sampler}"
+    path = args.results_dir + f"{sampler}/"
     if not os.path.exists(path):
             os.makedirs(path)
 
@@ -175,9 +172,13 @@ def main(args):
                     score_function = score_posterior, 
                     img_size = img_size
                 )
-                break
 
             elif sampler.lower() == "pc":
+                pc_params = [(1000, 10, 1e-2), (1000, 100, 1e-2), (1000, 1000, 1e-3)]
+                idx = int(THIS_WORKER//100)
+                pred, corr, snr = pc_params[idx]
+
+                print(f"Sampling pc pred = {pred}, corr = {corr}, snr = {snr}")
                 samples = pc_sampler(
                     y = observation,
                     sigma_y = sigma_y,
@@ -208,21 +209,21 @@ if __name__ == "__main__":
     # Likelihood parameters
     parser.add_argument("--sigma_likelihood",   required = True,                    type = float,   help = "The square root of the multiplier of the isotropic gaussian matrix")
     
-    parser.add_argument("--results_dir",        required=True, help="Directory where to save the TARP files")
-    parser.add_argument("--experiment_name",    required=True, help="Prefix for the name of the file")
+    parser.add_argument("--results_dir",        required = True,                                    help = "Directory where to save the TARP files")
+    parser.add_argument("--experiment_name",    required = True,                                    help = "Prefix for the name of the file")
     
-    parser.add_argument("--model_pixels",       required=True, type=int)
+    parser.add_argument("--model_pixels",       required = True,                    type = int)
     
     # Sampling parameters
-    parser.add_argument("--sampler",            required = False,   default = "pc", type = str,      help = "Sampling procedure used ('pc' or 'euler')")
+    parser.add_argument("--sampler",            required = False,   default = "pc", type = str,     help = "Sampling procedure used ('pc' or 'euler')")
     parser.add_argument("--num_samples",        required = False,   default = 20,   type = int,     help = "Number of samples from the posterior to create")
-    parser.add_argument("--batch_size",         required = False,   default=20, type=int)
+    parser.add_argument("--batch_size",         required = False,   default = 20,   type = int)
     parser.add_argument("--num_pred",           required = False,   default = 1000, type = int,     help ="Number of iterations in the loop to compute the reverse sde")
-    parser.add_argument("--num_corr",           required = False,   default = 20,   type = int,     help ="Number of iterations in the loop to compute the reverse sde")
+    parser.add_argument("--num_corr",           required = False,   default = 20,   type = int,     help ="Number of corrector steps for the reverse sde")
     parser.add_argument("--snr",                required = False,   default = 1e-2, type = float)
-    parser.add_argument("--pad",                required = False,   default = 0, type = int)
-    parser.add_argument("--sampling_function",  required=True)
-    parser.add_argument("--prior",              required=True)
+    parser.add_argument("--pad",                required = False,   default = 0,    type = int)
+    parser.add_argument("--sampling_function",  required = True)
+    parser.add_argument("--prior",              required = True)
     
     args = parser.parse_args()
     main(args) 
