@@ -95,10 +95,10 @@ def main(args):
 
     def pc_sampler(y, sigma_y, num_samples, num_pred_steps, num_corr_steps, score_function, snr = 1e-2, img_size = 28): 
         t = torch.ones(size = (num_samples, 1)).to(device)
-        x = torch.randn([num_samples, img_size ** 2]).to(device)
+        x = sigma(t) * torch.randn([num_samples, img_size ** 2]).to(device)
         dt = -1/num_pred_steps
         with torch.no_grad(): 
-            for _ in tqdm(range(num_pred_steps-1)): 
+            for i in tqdm(range(num_pred_steps-1)): 
                 # Corrector step: (Only if we are not at 0 temperature )
                 gradient = score_function(y, x, t, sigma_y)
                 for _ in range(num_corr_steps): 
@@ -118,6 +118,10 @@ def main(args):
                 noise = diffusion * (-dt) ** 0.5 * z
                 x = x_mean + noise
                 t += dt
+
+                # To check the time for sampling:
+                # if i == 20:
+                #     break
         return link_function(x_mean).reshape(-1, 1, img_size, img_size)
 
     def euler_sampler(y, sigma_y, num_samples, num_steps, score_function, img_size = 28): 
@@ -175,6 +179,7 @@ def main(args):
 
             elif sampler.lower() == "pc":
                 pc_params = [(1000, 10, 1e-2), (1000, 100, 1e-2), (1000, 1000, 1e-3)]
+                #pc_params = [(1000, 1000, 1e-3)]
                 idx = int(THIS_WORKER//100)
                 pred, corr, snr = pc_params[idx]
 
@@ -189,6 +194,7 @@ def main(args):
                     score_function = score_posterior,
                     img_size = img_size
                 )
+                
                 
             else : 
                 raise ValueError("The sampler specified is not implemented or does not exist. Choose between 'euler' and 'pc'")
