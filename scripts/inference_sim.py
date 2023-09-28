@@ -6,6 +6,7 @@ from tqdm import tqdm
 import h5py
 
 from score_models import ScoreModel
+import matplotlib.pyplot as plt
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -22,9 +23,23 @@ def main(args):
         return torch.fft.fft2(x, norm = "ortho")
 
     # Importing and loading the weights of the score of the prior 
-    score_model = ScoreModel(checkpoints_directory=args.prior)
+    prior = args.prior
+    score_model = ScoreModel(checkpoints_directory=prior)
     S = torch.tensor(np.load(args.sampling_function).astype(bool)).to(device)
     img_size = args.model_pixels
+
+    if "probes" in prior:
+        print("WARNING: RUNNING WITH OLD FUNCTION PROBES (OK IF 64*64)") 
+        C = 1/2
+        B = 1/2
+
+    elif "skirt" in prior: 
+        C = 1 # VP prior
+        B = 0 # VP
+    
+
+    def link_function(x):
+        return C * x + B
     
     def sigma(t):
         return score_model.sde.sigma(t)
@@ -53,14 +68,6 @@ def main(args):
         vis_sampled = torch.cat([vis_sampled.real, vis_sampled.imag])
         return vis_sampled[S]
     
-    # C = 1 # VP prior
-    # B = 0 # VP
-
-    C = 1/2
-    B = 1/2
-
-    def link_function(x):
-        return C * x + B
 
     def log_likelihood(y, x, t, sigma_y):
         """
@@ -75,14 +82,14 @@ def main(args):
             log-likelihood of a gaussian distribution
         """ 
         y_hat = model(x, t)
-        var = sigma(t) **2 / 2 * C**2 + mu(t)**2 * sigma_y**2
+        var = sigma(t) **2/2 + mu(t)**2 * sigma_y**2
         log_prob = -0.5 * torch.sum((mu(t) * y - y_hat)**2 / var)
         return log_prob
-    
+
     def score_likelihood(y, x, t, sigma_y): 
         x = x.flatten(start_dim = 1)
         return vmap(grad(lambda x, t: log_likelihood(y, x, t, sigma_y)), randomness = "different")(x, t)
-    
+
     def score_posterior(y, x, t, sigma_y): 
         x = x.reshape(-1, 1, img_size, img_size)
         return score_model.score(t, x).flatten(start_dim = 1) + score_likelihood(y, x, t, sigma_y) 
@@ -97,8 +104,10 @@ def main(args):
         t = torch.ones(size = (num_samples, 1)).to(device)
         x = sigma(t) * torch.randn([num_samples, img_size ** 2]).to(device)
         dt = -1/num_pred_steps
+
+
         with torch.no_grad(): 
-            for i in tqdm(range(num_pred_steps-1)): 
+            for _ in tqdm(range(num_pred_steps-1)): 
                 # Corrector step: (Only if we are not at 0 temperature )
                 gradient = score_function(y, x, t, sigma_y)
                 for _ in range(num_corr_steps): 
@@ -118,16 +127,14 @@ def main(args):
                 noise = diffusion * (-dt) ** 0.5 * z
                 x = x_mean + noise
                 t += dt
-
-                # To check the time for sampling:
-                # if i == 20:
-                #     break
-        return link_function(x_mean).reshape(-1, 1, img_size, img_size)
+                
+        return link_function(x_mean).reshape(-1, 1, img_size, img_size), chain
 
     def euler_sampler(y, sigma_y, num_samples, num_steps, score_function, img_size = 28): 
         t = torch.ones(size = (num_samples, 1)).to(device)
         x = sigma(t) * torch.randn([num_samples, img_size ** 2]).to(device)
         dt = -1/num_steps
+
         with torch.no_grad(): 
             for i in tqdm(range(num_steps - 1)): 
                 z = torch.randn_like(x).to(device)
@@ -150,8 +157,6 @@ def main(args):
     num_samples = args.num_samples
     
     path = args.results_dir + f"{sampler}/"
-    if not os.path.exists(path):
-            os.makedirs(path)
 
     filename = os.path.join(path, args.experiment_name + f"_{THIS_WORKER}" + ".h5")
     with h5py.File(filename, "w") as hf:
@@ -166,6 +171,9 @@ def main(args):
         hf["observation"] = observation.cpu().numpy().astype(np.float32).squeeze()
         hf["ground_truth"] = link_function(ground_truth).cpu().numpy().astype(np.float32).squeeze()
         
+        plt.imshow(ground_truth.squeeze().cpu(), cmap = "magma")
+        plt.savefig("new.jpeg")
+        plt.show()
         for i in range(int(num_samples//batch_size)):
             if sampler.lower() == "euler":    
                 samples = euler_sampler(
@@ -178,10 +186,10 @@ def main(args):
                 )
 
             elif sampler.lower() == "pc":
-                pc_params = [(1000, 10, 1e-2), (1000, 100, 1e-2), (1000, 1000, 1e-3)]
-                #pc_params = [(1000, 1000, 1e-3)]
-                idx = int(THIS_WORKER//100)
-                pred, corr, snr = pc_params[idx]
+                # pc_params = [(1000, 10, 1e-2), (1000, 100, 1e-2), (1000, 1000, 1e-3)]
+                # #pc_params = [(1000, 1000, 1e-3)]
+                # idx = int(THIS_WORKER//100)
+                # pred, corr, snr = pc_params[idx]
 
                 print(f"Sampling pc pred = {pred}, corr = {corr}, snr = {snr}")
                 samples = pc_sampler(
@@ -206,7 +214,21 @@ def main(args):
             for j in range(batch_size):
                 y_hat = model(samples[j], torch.zeros(1).to(device))
             hf["reconstruction"][i*B: (i+1)*B] = y_hat.cpu().numpy().astype(np.float32)
-            
+  
+    # plt.imshow(ground_truth.squeeze().cpu(), cmap = "magma")
+    # plt.savefig("new.jpeg", cmap = "magma")
+    # fig, axs = plt.subplots(1, 2, figsize = (8, 4))
+    # x = link_function(ground_truth).cpu().numpy().astype(np.float32).squeeze()
+    # im = axs[0].imshow(x, cmap = "magma")
+    # plt.colorbar(im, fraction = 0.046,ax = axs[0])
+
+    # im = axs[1].imshow(samples[0].squeeze().cpu().numpy().astype(np.float32), cmap="magma")
+    # plt.colorbar(im, fraction = 0.046, ax = axs[1])
+    # plt.subplots_adjust(wspace=0.5)
+    # plt.savefig("what.jpeg", bbox_inches="tight")
+    # print(x.sum())
+    # print(samples.sum())
+
 
 if __name__ == "__main__": 
     from argparse import ArgumentParser
@@ -215,9 +237,11 @@ if __name__ == "__main__":
     # Likelihood parameters
     parser.add_argument("--sigma_likelihood",   required = True,                    type = float,   help = "The square root of the multiplier of the isotropic gaussian matrix")
     
+    # Experiments spec
     parser.add_argument("--results_dir",        required = True,                                    help = "Directory where to save the TARP files")
     parser.add_argument("--experiment_name",    required = True,                                    help = "Prefix for the name of the file")
     
+
     parser.add_argument("--model_pixels",       required = True,                    type = int)
     
     # Sampling parameters
