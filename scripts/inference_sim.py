@@ -159,10 +159,14 @@ def main(args):
     path = args.results_dir + f"{sampler}/"
 
     filename = os.path.join(path, args.experiment_name + f"_{THIS_WORKER}" + ".h5")
+
+    ground_truth = score_model.sample([1, 1, args.model_pixels, args.model_pixels], steps=pred)
+    plt.imshow(ground_truth.squeeze().cpu(), cmap = "magma")
+    plt.savefig("new")
     with h5py.File(filename, "w") as hf:
         hf.create_dataset("model", [args.num_samples, 1, args.model_pixels, args.model_pixels], dtype=np.float32)
 
-        ground_truth = score_model.sample([1, 1, args.model_pixels, args.model_pixels], steps=pred)
+        
         observation = model(x = ground_truth.flatten(), t = torch.zeros(1).to(device))
         sigma_y = args.sigma_likelihood
         observation += torch.randn_like(observation) * sigma_y
@@ -171,9 +175,7 @@ def main(args):
         hf["observation"] = observation.cpu().numpy().astype(np.float32).squeeze()
         hf["ground_truth"] = link_function(ground_truth).cpu().numpy().astype(np.float32).squeeze()
         
-        plt.imshow(ground_truth.squeeze().cpu(), cmap = "magma")
-        plt.savefig("new.jpeg")
-        plt.show()
+        
         for i in range(int(num_samples//batch_size)):
             if sampler.lower() == "euler":    
                 samples = euler_sampler(
@@ -214,7 +216,7 @@ def main(args):
             for j in range(batch_size):
                 y_hat = model(samples[j], torch.zeros(1).to(device))
             hf["reconstruction"][i*B: (i+1)*B] = y_hat.cpu().numpy().astype(np.float32)
-  
+    
     # plt.imshow(ground_truth.squeeze().cpu(), cmap = "magma")
     # plt.savefig("new.jpeg", cmap = "magma")
     # fig, axs = plt.subplots(1, 2, figsize = (8, 4))
