@@ -6,12 +6,12 @@ from torch.func import vmap, grad
 import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-from scipy.stats import binned_statistic_2d
 import mpol.constants as const
 from typing import Callable
+import h5py
 
 
-from score_models import ScoreModel, NCSNpp
+from score_models import ScoreModel
 import json
 
 N_WORKERS = int(os.getenv('SLURM_ARRAY_TASK_COUNT', 1))
@@ -79,7 +79,7 @@ def main(args):
     
     #DATA IMPORT
     vis_bin_re = np.load(os.path.join(args.data_dir, "allspw_re.npy"))
-    std_bin_re = np.load(os.path.join(arga.data_dir,  "allspw_re_std.npy"))
+    std_bin_re = np.load(os.path.join(args.data_dir,  "allspw_re_std.npy"))
     counts = np.load(os.path.join(args.data_dir, "allspw_counts.npy"))
     vis_bin_imag = np.load(os.path.join(args.data_dir, "allspw_imag.npy"))
     std_bin_imag = np.load(os.path.join(args.data_dir, "allspw_imag_std.npy"))
@@ -251,6 +251,10 @@ def main(args):
                 x = x_mean + noise
                 t += dt
 
+               # To check the time for sampling:
+                # if i == 20:
+                #     break
+
         return link_function(x_mean).reshape(-1, 1, img_size, img_size)
 
     sampler = args.sampler
@@ -258,46 +262,39 @@ def main(args):
     corr = args.num_corr
     snr = args.snr
     num_samples = args.num_samples 
-    
     batch_size = args.batch_size
     
-    path = args.results_dir + f"{sampler}/"
-    if not os.path.exists(path):
-            os.makedirs(path)
+    path = args.results_dir + f"/{sampler}/"
+    # if not os.path.exists(path):
+    #         # os.makedirs(path)
 
-    filename = os.path.join(path, args.experiment_name + f"_{THIS_WORKER}" + ".h6")
-    with h6py.File(filename, "w") as hf:
-        hf.create_dataset("model", [args.num_samples, 2, args.model_pixels, args.model_pixels], dtype=np.float32)
+    filename = os.path.join(path, args.experiment_name + f"_{THIS_WORKER}" + ".h5")
+    with h5py.File(filename, "w") as hf:
+        hf.create_dataset("model", [args.num_samples, 1, args.model_pixels, args.model_pixels], dtype=np.float32)
+        hf.create_dataset("reconstruction", [args.num_samples, len(y)], dtype=np.float32)
+        hf["observation"] = y.cpu().numpy().astype(np.float32).squeeze()
 
-        ground_truth = score_model.sample([2, 1, args.model_pixels, args.model_pixels], steps=pred)
-        observation = model(x = ground_truth.flatten(), t = torch.zeros(2).to(device))
-        sigma_y = args.sigma_likelihood
-        observation += torch.randn_like(observation) * sigma_y
-
-        hf.create_dataset("reconstruction", [args.num_samples, observation.shape[1]], dtype=np.float32)
-        hf["observation"] = observation.cpu().numpy().astype(np.float33).squeeze()
-        hf["ground_truth"] = link_function(ground_truth).cpu().numpy().astype(np.float33).squeeze()
-        
         for i in range(int(num_samples//batch_size)):
             if sampler.lower() == "euler":    
                 samples = euler_sampler(
-                    y = observation,
+                    y = y,
                     sigma_y = sigma_y,
                     num_samples = batch_size,
                     num_steps = pred, 
                     score_function = score_posterior, 
                     img_size = img_size
                 )
+                
 
             elif sampler.lower() == "pc":
-                pc_params = [(1001, 10, 1e-2), (1000, 100, 1e-2), (1000, 1000, 1e-3)]
+                #pc_params = [(1001, 10, 1e-2), (1000, 100, 1e-2), (1000, 1000, 1e-3)]
                 #pc_params = [(1001, 1000, 1e-3)]
-                idx = int(THIS_WORKER//101)
-                pred, corr, snr = pc_params[idx]
+                # idx = int(THIS_WORKER//101)
+                # pred, corr, snr = pc_params[idx]
 
                 print(f"Sampling pc pred = {pred}, corr = {corr}, snr = {snr}")
                 samples = pc_sampler(
-                    y = observation,
+                    y = y,
                     sigma_y = sigma_y,
                     num_samples = batch_size,
                     num_pred_steps = pred,
@@ -311,15 +308,17 @@ def main(args):
             else : 
                 raise ValueError("The sampler specified is not implemented or does not exist. Choose between 'euler' and 'pc'")
             B = batch_size
-            hf["model"][i*B: (i+2)*B] = samples.cpu().numpy().astype(np.float32)
+            hf["model"][i*B: (i+1)*B] = samples.cpu().numpy().astype(np.float32)
 
             # Let's hope it doesn't take too much time compared to the posterior sampling:
-            y_hat = torch.empty(size = (B, 2, img_size, img_size)).to(device)
+            y_hat = torch.empty(size = (B, 1, img_size, img_size)).to(device)
             for j in range(batch_size):
-                y_hat = model(samples[j], torch.zeros(2).to(device))
-            hf["reconstruction"][i*B: (i+2)*B] = y_hat.cpu().numpy().astype(np.float32)
+                y_hat = model(samples[j], torch.zeros(1).to(device))
+            hf["reconstruction"][i*B: (i+1)*B] = y_hat.cpu().numpy().astype(np.float32)
 
-    
+    # import matplotlib.pyplot as plt
+    # plt.imshow(samples[0].squeeze().cpu().numpy().astype(np.float32), cmap="magma")
+    # plt.savefig("sanity.jpeg", bbox_inches="tight")
 
 if __name__ == "__main__": 
     from argparse import ArgumentParser
@@ -329,7 +328,7 @@ if __name__ == "__main__":
     # Sampling parameters
     parser.add_argument("--prior",              required = True,                    type = str,     help = "Path to the checkpoints directory of the prior")
     parser.add_argument("--data_dir",           required = True,                                    help = "Path where to find all the data files")
-    parser.add_argument("--padding",            required = False,   default = 2048, type = int,     help = "Size of the padded image.")
+    parser.add_argument("--padding",            required = False,   default = 4096, type = int,     help = "Size of the padded image.")
     parser.add_argument("--model_pixels",       required = False,   default = 256,  type = int,     help = "Size of the pixel grid for the prior")
     parser.add_argument("--sampler",            required = False,   default = "pc", type = str,     help = "Sampling procedure used ('pc' or 'euler')")
     parser.add_argument("--num_samples",        required = False,   default = 20,   type = int,     help = "Number of samples from the posterior to create")
