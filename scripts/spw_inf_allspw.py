@@ -77,12 +77,21 @@ def main(args):
     u_edges, v_edges = grid(pixel_scale = pixel_scale, img_size = npix)
     pixel_size = u_edges[1] - u_edges[0] # this is delta_u, and we should probably call it that in the future. My bad
     
-    #DATA IMPORT
-    vis_bin_re = np.load(os.path.join(args.data_dir, "allspw_re.npy"))
-    std_bin_re = np.load(os.path.join(args.data_dir,  "allspw_re_std.npy"))
-    counts = np.load(os.path.join(args.data_dir, "allspw_counts.npy"))
-    vis_bin_imag = np.load(os.path.join(args.data_dir, "allspw_imag.npy"))
-    std_bin_imag = np.load(os.path.join(args.data_dir, "allspw_imag_std.npy"))
+    # OLD DATA IMPORT
+    # vis_bin_re = np.load(os.path.join(args.data_dir, "allspw_re.npy"))
+    # std_bin_re = np.load(os.path.join(args.data_dir,  "allspw_re_std.npy"))
+    # counts = np.load(os.path.join(args.data_dir, "allspw_counts.npy"))
+    # vis_bin_imag = np.load(os.path.join(args.data_dir, "allspw_imag.npy"))
+    # std_bin_imag = np.load(os.path.join(args.data_dir, "allspw_imag_std.npy"))
+
+    # NEW DATA IMPORT: 
+    with np.load(args.data_dir) as data_gridded: 
+
+        vis_bin_re = data_gridded["vis_bin_re"]
+        vis_bin_imag = data_gridded["vis_bin_imag"]
+        std_bin_re = data_gridded["std_bin_re"]
+        std_bin_imag = data_gridded["std_bin_imag"]
+        counts = data_gridded["counts"]
 
     # From object type to float
     vis_bin_re = vis_bin_re.astype(float)
@@ -251,7 +260,7 @@ def main(args):
                 x = x_mean + noise
                 t += dt
 
-               # To check the time for sampling:
+               #To check the time for sampling:
                 # if i == 20:
                 #     break
 
@@ -316,9 +325,9 @@ def main(args):
                 y_hat = model(samples[j], torch.zeros(1).to(device))
             hf["reconstruction"][i*B: (i+1)*B] = y_hat.cpu().numpy().astype(np.float32)
 
-    # import matplotlib.pyplot as plt
-    # plt.imshow(samples[0].squeeze().cpu().numpy().astype(np.float32), cmap="magma")
-    # plt.savefig("sanity.jpeg", bbox_inches="tight")
+    import matplotlib.pyplot as plt
+    plt.imshow(samples[0].squeeze().cpu().numpy().astype(np.float32), cmap="magma")
+    plt.savefig("sanity2.jpeg", bbox_inches="tight")
 
 if __name__ == "__main__": 
     from argparse import ArgumentParser

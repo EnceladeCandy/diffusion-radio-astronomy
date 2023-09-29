@@ -24,15 +24,9 @@ def main(args):
     v = data["vv"]
     vis = data["data"]
     weight = data["weight"]
-    # vis_per_spw = data["vis_per_spw"]
 
-    # We combine spws...
-    # print(vis_per_spw)
-    # freq_per_spw = data["freq_per_spw"]
-    # chans_per_spw = np.array([8, 16, 16, 16, 8, 16, 16, 16, 16, 16, 16, 8, 16, 16, 16, 8]) # need to read those from CASA in the future
 
-    # n_spw = len(vis_per_spw)
-
+    # Hermitian augmentation:
     uu = np.concatenate([u, -u])
     vv = np.concatenate([v, -v])
 
