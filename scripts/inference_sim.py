@@ -146,6 +146,9 @@ def main(args):
                 x = x_mean + noise
                 t += dt
 
+                # if i==20:
+                #     break
+
         return link_function(x_mean).reshape(-1, 1, img_size, img_size)
 
     sampler = args.sampler
@@ -161,8 +164,6 @@ def main(args):
     filename = os.path.join(path, args.experiment_name + f"_{THIS_WORKER}" + ".h5")
 
     ground_truth = score_model.sample([1, 1, args.model_pixels, args.model_pixels], steps=pred)
-    plt.imshow(ground_truth.squeeze().cpu(), cmap = "magma")
-    plt.savefig("new")
     with h5py.File(filename, "w") as hf:
         hf.create_dataset("model", [args.num_samples, 1, args.model_pixels, args.model_pixels], dtype=np.float32)
 
@@ -216,20 +217,9 @@ def main(args):
             for j in range(batch_size):
                 y_hat = model(samples[j], torch.zeros(1).to(device))
             hf["reconstruction"][i*B: (i+1)*B] = y_hat.cpu().numpy().astype(np.float32)
-    
-    # plt.imshow(ground_truth.squeeze().cpu(), cmap = "magma")
-    # plt.savefig("new.jpeg", cmap = "magma")
-    # fig, axs = plt.subplots(1, 2, figsize = (8, 4))
-    # x = link_function(ground_truth).cpu().numpy().astype(np.float32).squeeze()
-    # im = axs[0].imshow(x, cmap = "magma")
-    # plt.colorbar(im, fraction = 0.046,ax = axs[0])
 
-    # im = axs[1].imshow(samples[0].squeeze().cpu().numpy().astype(np.float32), cmap="magma")
-    # plt.colorbar(im, fraction = 0.046, ax = axs[1])
-    # plt.subplots_adjust(wspace=0.5)
-    # plt.savefig("what.jpeg", bbox_inches="tight")
-    # print(x.sum())
-    # print(samples.sum())
+    print(samples[0].sum())
+    print(ground_truth.sum())
 
 
 if __name__ == "__main__": 
