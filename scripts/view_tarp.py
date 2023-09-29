@@ -84,7 +84,7 @@ def main(args):
         fig, ax = plt.subplots(1, 1, figsize=(6, 6), dpi = 150)
         ax.plot([0, 1], [0, 1], ls='--', color='k', label = "Ideal case")
         ax.plot(alpha, ecp, label='DRP', color = "red")
-        ax.fill_between(alpha, ecp - k*ecp_std, ecp + k* ecp_std, alpha = 0.5, color = "red", label = "Uncertainty zone ($3\sigma$)")
+        ax.fill_between(alpha, ecp - k*ecp_std, ecp + k* ecp_std, alpha = 0.5, color = "red", label = "Confidence interval ($3\sigma$)")
         ax.legend()
         ax.set_ylabel("Expected Coverage Probability")
         ax.set_xlabel("Credibility Level")
