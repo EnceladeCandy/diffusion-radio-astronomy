@@ -40,6 +40,8 @@ def main(args):
     vis_imag = np.concatenate([vis.imag, -vis.imag])
     weight_ = np.concatenate([weight, weight])
 
+    print(f"The measurement set contain {len(uu)} data points")
+
     def grid(pixel_scale, img_size): 
         """Given a pixel scale and a number of pixels in image space, grid the associated Fourier space
 
@@ -176,18 +178,6 @@ def main(args):
     # Count: 
     counts = bin_data(*params, statistics_fn="count", verbose=1)
 
-    # Dirty image plotp
-    dirty_image = vis_bin_re + 1j * vis_bin_imag
-
-    # Sanity checks plots:
-    import matplotlib.pyplot as plt
-    pixel_center = args.img_padded_size // 2
-    U = pixel_center + img_size
-    D = pixel_center - img_size
-    plt.imshow(dirty_image[D:U, D:U], cmap = "magma")
-    plt.colorbar()
-    plt.savefig(f"/home/scratch/dirty_image/{args.experiment_name}.jpeg", bbox_inches = "tight")
-
     np.savez(
         args.npz_dir,
         vis_bin_re = vis_bin_re,
@@ -204,11 +194,14 @@ if __name__ == "__main__":
     parser = ArgumentParser()
 
     # Sampling parameters
-    parser.add_argument("--ms_dir")
-    parser.add_argument("--npz_dir")
-    parser.add_argument("--img_padded_size",    type = int,     default = 4096)
-    parser.add_argument("--window_function", help = "Either sinc or pillbox")
+    parser.add_argument("--ms_dir",             required = True, help = "Directory to the processed .npz measurement set")
+    parser.add_argument("--npz_dir",            required = True, help = "Directory where to save the gridded visibilities (call it ms_gridded.npz)")
+    parser.add_argument("--pixel_scale",        required = True, type = float,  help = "In arcsec")
+    parser.add_argument("--img_padded_size",    required = True, type = int,     default = 4096)
+    parser.add_argument("--window_function",    required = True, help = "Either sinc or pillbox")
     parser.add_argument("--experiment_name")
+    parser.add_argument("--img_size",           required = True,    type = int)
+    
 
     args = parser.parse_args()
     main(args) 
