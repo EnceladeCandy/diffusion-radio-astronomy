@@ -6,7 +6,7 @@ import shutil
 Micah Bowles' code
 """
 
-size = "0.0015arcsec" # pixel scale 
+size = 0.15 # pixel scale 
 img_size = 256   # number of pixels in the dirty image
 def quick_clean(vis, overwrite=True, index=None):
     vis = Path(vis)
@@ -33,11 +33,12 @@ def quick_clean(vis, overwrite=True, index=None):
         datacolumn="data",
         imsize=(img_size, img_size),
         cell=[size, size],
-        niter=200, 
+        niter=0, 
         nterms = 2, 
         deconvolver = "mtmfs",
         calcpsf=True, 
-        weighting = "natural",
+        weighting = "briggs",
+        robust=0.0
     )
     return image_name
 
