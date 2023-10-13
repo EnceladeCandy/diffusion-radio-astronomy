@@ -5,14 +5,16 @@ import matplotlib.pyplot as plt
 from astropy.wcs.utils import proj_plane_pixel_scales
 from astropy.io import fits
 import colorcet as cc
+import h5py
 import numpy as np
 import torch
+from glob import glob
+from tqdm import tqdm
 from astropy.wcs import WCS
 import os
-
 import sys
+
 sys.path.append("..\\")
-from utils import fits_to_tensor
 plt.style.use("science") # Need SciencePLots
 params = {
          'axes.labelsize': 25,
@@ -36,22 +38,29 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 def main(args):
     ms = args.ms
     sampler = args.sampler
-    path = f"../../samples_targets/{ms}/{sampler}"
-    batch_size = torch.load(path + "/0.pt", map_location=device).shape[0]
+
+    dir_results = f"/home/noedia/scratch/tarp_samples/{sampler}/"
+
+    pattern = args.experiment_name + "*.h5"
+    paths = glob(dir_results + pattern)
     
-    ls_samples = os.listdir(path)
+    # 40 samples per file
+    N = 40
+    samples = np.empty(shape = (N * len(paths), 256, 256)) # (N_samples, img_size, img_size)
 
-    num_samples = batch_size * len(ls_samples)
-    samples = torch.empty(size =  (num_samples, 256, 256)) # Probes = 256 * 256
+    for i, path in tqdm(enumerate(paths)):
+        with h5py.File(path, "r") as hf:
+            hf.keys()
+            samples[N*i:N*(i+1), :] = np.array(hf["model"])
+    
 
-    for i in range(len(ls_samples)): 
-        samples[i * batch_size: (i+1) * batch_size] = torch.load(path + "/" + ls_samples[i])
+    # Creating the dirty image
+    vis_bin_re = np.load(os.path.join(args.data_dir, "allspw_re.npy"))
+    vis_bin_imag = np.load(os.path.join(args.data_dir, "allspw_imag.npy"))
+    dirty_image = np.fft.ifft2(vis_bin_re + 1j * vis_bin_imag, norm = "ortho")
 
-    header, dirty_image = fits_to_tensor(f"../../data_targets2/{ms}.fits")
-    dirty_image = dirty_image.cpu().numpy()
-
-    samples = samples * 1e3 # mJy/beam
-    dirty_image = dirty_image * 1e3 # mJy/beam
+    # samples = samples * 1e3 # mJy/beam
+    # dirty_image = dirty_image * 1e3 # mJy/beam
 
     def draw_scale_and_compass(ax, cutout, wcs, rotation=0, scale=1, x0=0.1, y0=0.1, compass_size=0.1, arrow_size=0.001, color="k", lw=2, textpad=5, fontsize=15):
         hdr = wcs.to_header()
@@ -191,5 +200,7 @@ if __name__ == "__main__":
     # Ground-truth parameters
     parser.add_argument("--ms",                required = False,   default = "HTLup_continuum0.0015arcsec2" ,    type = str,     help = "Name of the target") 
     parser.add_argument("--sampler",           required = False,   default = "euler")
+    parser.add_argument("--results_dir",       required = True)
+    parser.add_argument("--experiment_name",   required = True)
     args = parser.parse_args()
     main(args) 

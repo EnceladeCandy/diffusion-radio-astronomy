@@ -4,8 +4,27 @@ import os
 from glob import glob
 import h5py
 from tqdm import tqdm
-from typing import Tuple, Union
+import scienceplots
 from tarp_perso import bootstrapping, get_drp_coverage
+import matplotlib.pylab as pylab
+
+plt.style.use("science") # Need SciencePLots
+params = {
+         'axes.labelsize': 50,
+         'axes.titlesize': 30,
+         'ytick.labelsize' :10,
+         'xtick.labelsize' :10,
+         'xtick.major.size': 4,
+         'xtick.minor.size': 4,
+         'xtick.major.width': 1,
+         'xtick.minor.width': 1,
+         'ytick.color': "k",
+         'xtick.color': "k",
+         'axes.labelcolor': "k",
+         'ytick.labelcolor' : "k",
+         'xtick.labelcolor' : "k",
+         }
+pylab.rcParams.update(params)
 
 
 
@@ -30,25 +49,14 @@ def main(args):
     # Ground-truths
     theta = np.empty(shape = (num_sims, num_dims)) # (n_sims, n_dims)
     
-
-
     for i, path in tqdm(enumerate(paths)):
         with h5py.File(path, "r") as hf:
             hf.keys()
-            samples[:, i, :] = np.array(hf["model"]).reshape(600, num_dims)[:300, :]
+            samples[:, i, :] = np.array(hf["model"]).reshape(num_samples, num_dims)
             theta[i, :] = np.array(hf["ground_truth"]).flatten()
 
  
     print("Importing the samples and the ground-truths...")
-    # for i in tqdm(range(num_sims)):
-    #     samples[:, i, :] = np.load(path + "/" + samples_files[i], map_location=torch.device(device)).flatten(start_dim = 1)
-    #     k = int(samples_files[i].split("_")[-1].replace(".pt", ""))
-    #     theta[i, :] = probes_64(dataset, k).flatten()
-
-    # # tarp is coded for numpy
-    # samples = samples.numpy()
-    # theta = theta.numpy()
-    
     # Sanity check: 
 
     fig, axs = plt.subplots(1, 5, figsize = (5*3.5, 3.5))
@@ -70,31 +78,34 @@ def main(args):
         print("Applying bootstrapping method")
         k = args.uncertainty
         ecp, ecp_std, alpha = bootstrapping(samples, theta, references = "random", metric = "euclidean", norm = False)
-        #ecp, ecp_std, alpha = np.insert(ecp, 0, 0), np.insert(ecp_std, 0, 0), np.insert(alpha, 0, 0)
+        ecp, ecp_std, alpha = np.insert(ecp, 0, 0), np.insert(ecp_std, 0, 0), np.insert(alpha, 0, 0)
+        ecp, ecp_std, alpha = np.append(ecp, 1), np.append(ecp_std, 0), np.append(alpha, 1)
         #print(ecp.shape)
         fig, ax = plt.subplots(1, 1, figsize=(6, 6), dpi = 150)
         ax.plot([0, 1], [0, 1], ls='--', color='k', label = "Ideal case")
-        ax.plot(alpha, ecp, label='DRP')
-        ax.fill_between(alpha, ecp - k*ecp_std, ecp + k* ecp_std, alpha = 0.4, color = "orange", label = "Uncertainty zone ($3\sigma$)")
+        ax.plot(alpha, ecp, label='DRP', color = "red")
+        ax.fill_between(alpha, ecp - k*ecp_std, ecp + k* ecp_std, alpha = 0.5, color = "red", label = "Confidence interval ($3\sigma$)")
         ax.legend()
-        ax.set_ylabel("Expected Coverage")
+        ax.set_ylabel("Expected Coverage Probability")
         ax.set_xlabel("Credibility Level")
+        ax.set(xlim = [0, 1], ylim = [0, 1])
         #plt.title(args.title, fontsize = 10)
+        plt.savefig(tarp_folder + f"bootstrap{sampler}_{args.experiment_name}.jpeg", bbox_inches = "tight", pad_inches = 0.2)
     else: 
         print("Applying a regular method")
         ecp, alpha = get_drp_coverage(samples, theta, references = "random", metric = "euclidean", norm = True)
-        #ecp, alpha = np.insert(ecp, 0, 0), np.insert(alpha, 0, 0)
+        ecp, alpha = np.insert(ecp, 0, 0), np.insert(alpha, 0, 0)
         print(ecp.shape)
         fig, ax = plt.subplots(1, 1, figsize=(6, 6), dpi = 150)
         ax.plot([0, 1], [0, 1], ls='--', color='k', label = "Ideal case")
-        ax.plot(alpha, ecp, label='DRP')
+        ax.plot(alpha, ecp, label='DRP', color = "red")
         ax.legend()
         ax.set_ylabel("Expected Coverage")
         ax.set_xlabel("Credibility Level")
         plt.title(args.title, fontsize = 10)
     
-    
-    plt.savefig(tarp_folder + f"bootstrap{sampler}_{args.file_name}.jpeg", bbox_inches = "tight", pad_inches = 0.2)
+        plt.savefig(tarp_folder + f"{sampler}_{args.experiment_name}.jpeg", bbox_inches = "tight", pad_inches = 0.2)    
+
 
 
 if __name__ == '__main__':
