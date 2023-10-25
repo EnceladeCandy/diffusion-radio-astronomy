@@ -327,7 +327,7 @@ def main(args):
 
     import matplotlib.pyplot as plt
     plt.imshow(samples[0].squeeze().cpu().numpy().astype(np.float32), cmap="magma")
-    plt.savefig("sanity2.jpeg", bbox_inches="tight")
+    plt.savefig(f"sanity{args.experiment_name}.jpeg", bbox_inches="tight")
 
 if __name__ == "__main__": 
     from argparse import ArgumentParser

@@ -10,14 +10,14 @@ import matplotlib.pylab as pylab
 
 plt.style.use("science") # Need SciencePLots
 params = {
-         'axes.labelsize': 50,
-         'axes.titlesize': 30,
-         'ytick.labelsize' :10,
-         'xtick.labelsize' :10,
+         'axes.labelsize': 40,
+         'axes.titlesize': 40,
+         'ytick.labelsize' : 15,
+         'xtick.labelsize' : 15,
          'xtick.major.size': 4,
          'xtick.minor.size': 4,
-         'xtick.major.width': 1,
-         'xtick.minor.width': 1,
+         'xtick.major.width': 0.5,
+         'xtick.minor.width': 0.5,
          'ytick.color': "k",
          'xtick.color': "k",
          'axes.labelcolor': "k",
@@ -26,7 +26,7 @@ params = {
          }
 pylab.rcParams.update(params)
 
-
+plt.rcParams["font.size"] = 20
 
 def main(args):
 
@@ -84,13 +84,13 @@ def main(args):
         fig, ax = plt.subplots(1, 1, figsize=(6, 6), dpi = 150)
         ax.plot([0, 1], [0, 1], ls='--', color='k', label = "Ideal case")
         ax.plot(alpha, ecp, label='DRP', color = "red")
-        ax.fill_between(alpha, ecp - k*ecp_std, ecp + k* ecp_std, alpha = 0.5, color = "red", label = "Confidence interval ($3\sigma$)")
+        ax.fill_between(alpha, ecp - k*ecp_std, ecp + k* ecp_std, alpha = 0.5, color = "red", label = "95\% CI")
         ax.legend()
         ax.set_ylabel("Expected Coverage Probability")
         ax.set_xlabel("Credibility Level")
         ax.set(xlim = [0, 1], ylim = [0, 1])
         #plt.title(args.title, fontsize = 10)
-        plt.savefig(tarp_folder + f"bootstrap{sampler}_{args.experiment_name}.jpeg", bbox_inches = "tight", pad_inches = 0.2)
+        plt.savefig(tarp_folder + f"bootstrap{sampler}_{args.experiment_name}.pdf", bbox_inches = "tight", pad_inches = 0.2)
     else: 
         print("Applying a regular method")
         ecp, alpha = get_drp_coverage(samples, theta, references = "random", metric = "euclidean", norm = True)
@@ -102,9 +102,9 @@ def main(args):
         ax.legend()
         ax.set_ylabel("Expected Coverage")
         ax.set_xlabel("Credibility Level")
-        plt.title(args.title, fontsize = 10)
+        #plt.title(args.title, fontsize = 10)
     
-        plt.savefig(tarp_folder + f"{sampler}_{args.experiment_name}.jpeg", bbox_inches = "tight", pad_inches = 0.2)    
+        plt.savefig(tarp_folder + f"{sampler}_{args.experiment_name}.pdf", bbox_inches = "tight", pad_inches = 0.2)    
 
 
 

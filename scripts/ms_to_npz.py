@@ -25,8 +25,8 @@ def main(args):
     # for a given spw
     for spw in spws:
         # calculate rescale factor from CLEAN's results
-        sigma_rescale = scatter.get_sigma_rescale_datadescid(fname, spw)
-
+        #sigma_rescale = scatter.get_sigma_rescale_datadescid(fname, spw)
+        sigma_rescale=1.
         # Get visibilities
         d = process.get_processed_visibilities(fname, spw, sigma_rescale=1.0)
         
